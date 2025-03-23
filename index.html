@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STL Viewer with Transformations</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #header {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+        #container {
+            display: flex;
+            flex: 1;
+        }
+        #controls {
+            width: 250px;
+            padding: 20px;
+            background-color: #f0f0f0;
+            overflow-y: auto;
+        }
+        #viewer {
+            flex: 1;
+            background-color: #e0e0e0;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .value-display {
+            display: inline-block;
+            width: 50px;
+            text-align: right;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 5px 0;
+            width: 100%;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>STL Viewer with Transformations</h1>
+    </div>
+    <div id="container">
+        <div id="controls">
+            <div class="control-group">
+                <label for="stl-file">Upload STL File(s):</label>
+                <input type="file" id="stl-file" accept=".stl" multiple>
+                <div id="file-list" style="margin-top: 10px; max-height: 100px; overflow-y: auto;"></div>
+            </div>
+            
+            <div class="control-group">
+                <label>Models:</label>
+                <select id="model-selector" style="width: 100%; margin-bottom: 10px;">
+                    <option value="">Select a model to transform</option>
+                </select>
+                <button id="remove-model">Remove Selected Model</button>
+                <button id="export-stl">Export Transformed STL</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Translation</h3>
+                <label>X: <span id="translate-x-value" class="value-display">0</span></label>
+                <input type="range" id="translate-x" min="-50" max="50" value="0" step="0.1">
+                
+                <label>Y: <span id="translate-y-value" class="value-display">0</span></label>
+                <input type="range" id="translate-y" min="-50" max="50" value="0" step="0.1">
+                
+                <label>Z: <span id="translate-z-value" class="value-display">0</span></label>
+                <input type="range" id="translate-z" min="-50" max="50" value="0" step="0.1">
+            </div>
+            
+            <div class="control-group">
+                <h3>Rotation (degrees)</h3>
+                <label>X: <span id="rotate-x-value" class="value-display">0</span></label>
+                <input type="range" id="rotate-x" min="0" max="360" value="0" step="1">
+                
+                <label>Y: <span id="rotate-y-value" class="value-display">0</span></label>
+                <input type="range" id="rotate-y" min="0" max="360" value="0" step="1">
+                
+                <label>Z: <span id="rotate-z-value" class="value-display">0</span></label>
+                <input type="range" id="rotate-z" min="0" max="360" value="0" step="1">
+            </div>
+            
+            <div class="control-group">
+                <h3>Scale</h3>
+                <label>Uniform: <span id="scale-value" class="value-display">1</span></label>
+                <input type="range" id="scale" min="0.1" max="5" value="1" step="0.1">
+                
+                <label>X: <span id="scale-x-value" class="value-display">1</span></label>
+                <input type="range" id="scale-x" min="0.1" max="5" value="1" step="0.1">
+                
+                <label>Y: <span id="scale-y-value" class="value-display">1</span></label>
+                <input type="range" id="scale-y" min="0.1" max="5" value="1" step="0.1">
+                
+                <label>Z: <span id="scale-z-value" class="value-display">1</span></label>
+                <input type="range" id="scale-z" min="0.1" max="5" value="1" step="0.1">
+            </div>
+            
+            <div class="control-group">
+                <button id="reset-transform">Reset Transformations</button>
+                <button id="center-model">Center Model</button>
+            </div>
+        </div>
+        <div id="viewer"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.min.js"></script>
+
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f0f0);
+        
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+        
+        // Renderer setup
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth - 250, window.innerHeight - 50);
+        document.getElementById('viewer').appendChild(renderer.domElement);
+        
+        // Orbit controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        
+        const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight1.position.set(1, 1, 1);
+        scene.add(directionalLight1);
+        
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight2.position.set(-1, -1, -1);
+        scene.add(directionalLight2);
+        
+        // Grid helper
+        const gridHelper = new THREE.GridHelper(10, 10);
+        scene.add(gridHelper);
+        
+        // Axes helper
+        const axesHelper = new THREE.AxesHelper(5);
+        scene.add(axesHelper);
+        
+        // Models collection
+        const models = {};
+        let activeModel = null;
+        let nextModelId = 0;
+        
+        // File upload handling
+        document.getElementById('stl-file').addEventListener('change', function(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            
+            // Clear file list display
+            const fileListElement = document.getElementById('file-list');
+            
+            // Process each file
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+                
+                reader.onload = function(event) {
+                    const contents = event.target.result;
+                    const modelId = 'model_' + nextModelId++;
+                    loadSTL(contents, modelId, file.name);
+                };
+                
+                reader.readAsArrayBuffer(file);
+                
+                // Add file to list display
+                const fileItem = document.createElement('div');
+                fileItem.textContent = file.name;
+                fileListElement.appendChild(fileItem);
+            }
+        });
+        
+        // Load STL function
+        function loadSTL(buffer, modelId, fileName) {
+            const loader = new THREE.STLLoader();
+            const geometry = loader.parse(buffer);
+            
+            // Store original geometry for later export
+            const originalGeometry = geometry.clone();
+            
+            // Create material with a random color
+            const color = new THREE.Color(Math.random(), Math.random(), Math.random());
+            const material = new THREE.MeshPhongMaterial({
+                color: color,
+                specular: 0x111111,
+                shininess: 100
+            });
+            
+            // Create mesh
+            const mesh = new THREE.Mesh(geometry, material);
+            
+            // Center the model
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            geometry.translate(-center.x, -center.y, -center.z);
+            
+            // Add model to scene
+            scene.add(mesh);
+            
+            // Store model data
+            models[modelId] = {
+                mesh: mesh,
+                originalGeometry: originalGeometry,
+                fileName: fileName || `model_${modelId}.stl`
+            };
+            
+            // Add to model selector
+            const modelSelector = document.getElementById('model-selector');
+            const option = document.createElement('option');
+            option.value = modelId;
+            option.textContent = fileName || `Model ${modelId}`;
+            modelSelector.appendChild(option);
+            
+            // Select the newly added model
+            modelSelector.value = modelId;
+            activeModel = mesh;
+            
+            // Reset all transformation controls
+            resetTransformations();
+            
+            // Adjust camera to fit all models
+            fitCameraToAllObjects();
+        }
+        
+        // Function to fit camera to object
+        function fitCameraToObject(camera, object) {
+            const boundingBox = new THREE.Box3().setFromObject(object);
+            const size = boundingBox.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / Math.sin(fov / 2));
+            
+            // Add some padding
+            cameraZ *= 1.5;
+            
+            camera.position.z = cameraZ;
+            
+            const minZ = boundingBox.min.z;
+            const cameraToFarEdge = (minZ < 0) ? -minZ + cameraZ : cameraZ - minZ;
+            
+            camera.far = cameraToFarEdge * 3;
+            camera.updateProjectionMatrix();
+            
+            // Set orbit controls target to center of object
+            controls.target = new THREE.Vector3(0, 0, 0);
+            controls.update();
+        }
+        
+        // Function to fit camera to all objects
+        function fitCameraToAllObjects() {
+            // Create bounding box containing all objects
+            const boundingBox = new THREE.Box3();
+            
+            // Check if there are any models
+            let modelCount = 0;
+            for (const id in models) {
+                boundingBox.expandByObject(models[id].mesh);
+                modelCount++;
+            }
+            
+            if (modelCount === 0) return;
+            
+            const size = boundingBox.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / Math.sin(fov / 2));
+            
+            // Add some padding
+            cameraZ *= 1.5;
+            
+            camera.position.z = cameraZ;
+            
+            const minZ = boundingBox.min.z;
+            const cameraToFarEdge = (minZ < 0) ? -minZ + cameraZ : cameraZ - minZ;
+            
+            camera.far = cameraToFarEdge * 3;
+            camera.updateProjectionMatrix();
+            
+            // Set orbit controls target to center of scene
+            controls.target = new THREE.Vector3(0, 0, 0);
+            controls.update();
+        }
+        
+        // Transformation controls
+        // Translation
+        const translateX = document.getElementById('translate-x');
+        const translateY = document.getElementById('translate-y');
+        const translateZ = document.getElementById('translate-z');
+        
+        translateX.addEventListener('input', updateTransform);
+        translateY.addEventListener('input', updateTransform);
+        translateZ.addEventListener('input', updateTransform);
+        
+        // Rotation
+        const rotateX = document.getElementById('rotate-x');
+        const rotateY = document.getElementById('rotate-y');
+        const rotateZ = document.getElementById('rotate-z');
+        
+        rotateX.addEventListener('input', updateTransform);
+        rotateY.addEventListener('input', updateTransform);
+        rotateZ.addEventListener('input', updateTransform);
+        
+        // Scale
+        const scale = document.getElementById('scale');
+        const scaleX = document.getElementById('scale-x');
+        const scaleY = document.getElementById('scale-y');
+        const scaleZ = document.getElementById('scale-z');
+        
+        scale.addEventListener('input', function() {
+            const value = parseFloat(this.value);
+            scaleX.value = value;
+            scaleY.value = value;
+            scaleZ.value = value;
+            document.getElementById('scale-x-value').textContent = value.toFixed(1);
+            document.getElementById('scale-y-value').textContent = value.toFixed(1);
+            document.getElementById('scale-z-value').textContent = value.toFixed(1);
+            updateTransform();
+        });
+        
+        scaleX.addEventListener('input', updateTransform);
+        scaleY.addEventListener('input', updateTransform);
+        scaleZ.addEventListener('input', updateTransform);
+        
+        // Reset transformations
+        document.getElementById('reset-transform').addEventListener('click', resetTransformations);
+        
+        // Center model
+        document.getElementById('center-model').addEventListener('click', function() {
+            if (activeModel) {
+                activeModel.position.set(0, 0, 0);
+                translateX.value = 0;
+                translateY.value = 0;
+                translateZ.value = 0;
+                updateValueDisplays();
+            }
+        });
+        
+        // Model selector change handler
+        document.getElementById('model-selector').addEventListener('change', function() {
+            const modelId = this.value;
+            if (modelId && models[modelId]) {
+                activeModel = models[modelId].mesh;
+                
+                // Update sliders to reflect the selected model's transformations
+                updateSlidersToModel(activeModel);
+            } else {
+                activeModel = null;
+                resetTransformations();
+            }
+        });
+        
+        // Update sliders to match the selected model
+        function updateSlidersToModel(model) {
+            // Translation
+            translateX.value = model.position.x;
+            translateY.value = model.position.y;
+            translateZ.value = model.position.z;
+            
+            // Rotation (convert radians to degrees)
+            rotateX.value = (model.rotation.x * 180 / Math.PI) % 360;
+            rotateY.value = (model.rotation.y * 180 / Math.PI) % 360;
+            rotateZ.value = (model.rotation.z * 180 / Math.PI) % 360;
+            
+            // Scale
+            scaleX.value = model.scale.x;
+            scaleY.value = model.scale.y;
+            scaleZ.value = model.scale.z;
+            
+            // If all scales are the same, update uniform scale slider
+            if (model.scale.x === model.scale.y && model.scale.x === model.scale.z) {
+                scale.value = model.scale.x;
+            }
+            
+            updateValueDisplays();
+        }
+        
+        // Remove model button handler
+        document.getElementById('remove-model').addEventListener('click', function() {
+            const modelSelector = document.getElementById('model-selector');
+            const modelId = modelSelector.value;
+            
+            if (modelId && models[modelId]) {
+                // Remove from scene
+                scene.remove(models[modelId].mesh);
+                
+                // Remove from selector
+                for (let i = 0; i < modelSelector.options.length; i++) {
+                    if (modelSelector.options[i].value === modelId) {
+                        modelSelector.remove(i);
+                        break;
+                    }
+                }
+                
+                // Delete from models object
+                delete models[modelId];
+                
+                // Set activeModel to null
+                activeModel = null;
+                
+                // Select another model if available
+                if (modelSelector.options.length > 1) {
+                    modelSelector.selectedIndex = 1; // Skip the "Select a model" option
+                    const newSelectedId = modelSelector.value;
+                    if (newSelectedId && models[newSelectedId]) {
+                        activeModel = models[newSelectedId].mesh;
+                        updateSlidersToModel(activeModel);
+                    }
+                } else {
+                    resetTransformations();
+                }
+            }
+        });
+        
+        // Update model transform
+        function updateTransform() {
+            if (!activeModel) return;
+            
+            // Update value displays first
+            updateValueDisplays();
+            
+            // Translation
+            activeModel.position.x = parseFloat(translateX.value);
+            activeModel.position.y = parseFloat(translateY.value);
+            activeModel.position.z = parseFloat(translateZ.value);
+            
+            // Rotation (convert degrees to radians)
+            activeModel.rotation.x = parseFloat(rotateX.value) * Math.PI / 180;
+            activeModel.rotation.y = parseFloat(rotateY.value) * Math.PI / 180;
+            activeModel.rotation.z = parseFloat(rotateZ.value) * Math.PI / 180;
+            
+            // Scale
+            activeModel.scale.x = parseFloat(scaleX.value);
+            activeModel.scale.y = parseFloat(scaleY.value);
+            activeModel.scale.z = parseFloat(scaleZ.value);
+        }
+        
+        // Update value displays
+        function updateValueDisplays() {
+            document.getElementById('translate-x-value').textContent = parseFloat(translateX.value).toFixed(1);
+            document.getElementById('translate-y-value').textContent = parseFloat(translateY.value).toFixed(1);
+            document.getElementById('translate-z-value').textContent = parseFloat(translateZ.value).toFixed(1);
+            
+            document.getElementById('rotate-x-value').textContent = parseInt(rotateX.value);
+            document.getElementById('rotate-y-value').textContent = parseInt(rotateY.value);
+            document.getElementById('rotate-z-value').textContent = parseInt(rotateZ.value);
+            
+            document.getElementById('scale-value').textContent = parseFloat(scale.value).toFixed(1);
+            document.getElementById('scale-x-value').textContent = parseFloat(scaleX.value).toFixed(1);
+            document.getElementById('scale-y-value').textContent = parseFloat(scaleY.value).toFixed(1);
+            document.getElementById('scale-z-value').textContent = parseFloat(scaleZ.value).toFixed(1);
+        }
+        
+        // Reset transformations
+        function resetTransformations() {
+            // Reset sliders to default values
+            translateX.value = 0;
+            translateY.value = 0;
+            translateZ.value = 0;
+            
+            rotateX.value = 0;
+            rotateY.value = 0;
+            rotateZ.value = 0;
+            
+            scale.value = 1;
+            scaleX.value = 1;
+            scaleY.value = 1;
+            scaleZ.value = 1;
+            
+            // Update model and displays
+            updateValueDisplays();
+            if (activeModel) {
+                activeModel.position.set(0, 0, 0);
+                activeModel.rotation.set(0, 0, 0);
+                activeModel.scale.set(1, 1, 1);
+            }
+        }
+        
+        // Export STL button handler
+        document.getElementById('export-stl').addEventListener('click', function() {
+            if (!activeModel) {
+                alert('Please select a model to export');
+                return;
+            }
+            
+            // Create STL Exporter
+            const exporter = new THREE.STLExporter();
+            
+            // Export the mesh with transformations applied
+            const result = exporter.parse(activeModel, { binary: true });
+            
+            // Create download link
+            const blob = new Blob([result], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            
+            // Find the original file name for this model
+            let fileName = 'transformed_model.stl';
+            for (const id in models) {
+                if (models[id].mesh === activeModel) {
+                    fileName = 'transformed_' + models[id].fileName;
+                    break;
+                }
+            }
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            
+            // Clean up
+            URL.revokeObjectURL(url);
+        });
+        
+        // Resize handler
+        window.addEventListener('resize', function() {
+            camera.aspect = (window.innerWidth - 250) / (window.innerHeight - 50);
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth - 250, window.innerHeight - 50);
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
